@@ -1,0 +1,375 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Veo 前端極簡測試</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Noto Sans TC', Arial, sans-serif; margin: 24px; }
+    button { padding: 10px 16px; font-size: 16px; }
+    textarea, input { width: 100%; max-width: 800px; }
+    .row { margin: 12px 0; }
+
+    /* Tab 樣式 */
+    .tab-container { border: 1px solid #ddd; border-radius: 8px; overflow: hidden; }
+    .tab-buttons { display: flex; background: #f8f9fa; border-bottom: 1px solid #ddd; }
+    .tab-btn { flex: 1; padding: 12px 20px; border: none; background: transparent; cursor: pointer; font-size: 16px; transition: background 0.3s; }
+    .tab-btn.active { background: #fff; border-bottom: 2px solid #007bff; font-weight: bold; }
+    .tab-btn:hover { background: #e9ecef; }
+    .tab-content { padding: 20px; background: #fff; }
+
+    /* 隱藏的 tab 內容 */
+    .tab-content.hidden { display: none; }
+
+    /* 圖片上傳區域 */
+    .image-upload-area { border: 2px dashed #007bff; border-radius: 8px; padding: 40px; text-align: center; cursor: pointer; transition: border-color 0.3s; }
+    .image-upload-area:hover { border-color: #0056b3; }
+    .image-upload-area.dragover { border-color: #28a745; background: #f8fff8; }
+    .image-preview { max-width: 300px; max-height: 200px; border-radius: 8px; margin-top: 10px; display: none; }
+    .image-info { margin-top: 10px; font-size: 14px; color: #666; }
+
+    video { width: 100%; max-width: 720px; margin-top: 16px; }
+    pre { background: #f4f4f4; padding: 10px; overflow: auto; }
+  </style>
+</head>
+<body>
+  <h1>Veo 前端極簡測試</h1>
+
+  <!-- Tab 容器 -->
+  <div class="tab-container">
+    <!-- Tab 按鈕 -->
+    <div class="tab-buttons">
+      <button class="tab-btn active" data-tab="text">📝 文字生成</button>
+      <button class="tab-btn" data-tab="image">🖼️ 圖片+文字</button>
+    </div>
+
+    <!-- Tab 1: 文字生成 -->
+    <div id="text-tab" class="tab-content">
+      <div class="row">
+        <label>提示詞（prompt）</label>
+        <textarea id="text-prompt" rows="4">A serene sunset over mountains in watercolor</textarea>
+      </div>
+      <div class="row">
+        <label>解析度</label>
+        <select id="text-resolution">
+          <option value="720p" selected>720p</option>
+          <option value="480p">480p</option>
+          <option value="1080p">1080p</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- Tab 2: 圖片+文字 -->
+    <div id="image-tab" class="tab-content hidden">
+      <div class="row">
+        <label>上傳圖片</label>
+        <div class="image-upload-area" id="image-upload-area">
+          <div>📸 點擊或拖拽圖片到此處</div>
+          <div style="font-size: 12px; color: #666; margin-top: 8px;">支援 JPG、PNG 格式</div>
+          <input type="file" id="image-input" accept="image/jpeg,image/png" style="display: none;">
+        </div>
+        <img id="image-preview" class="image-preview" alt="預覽圖片">
+        <div id="image-info" class="image-info"></div>
+      </div>
+      <div class="row">
+        <label>提示詞（prompt）- 可選，用於描述想要的動畫效果</label>
+        <textarea id="image-prompt" rows="3" placeholder="例如：讓圖片中的場景動起來，太陽緩緩移動，雲朵飄移"></textarea>
+      </div>
+      <div class="row">
+        <label>解析度</label>
+        <select id="image-resolution">
+          <option value="720p" selected>720p</option>
+          <option value="480p">480p</option>
+          <option value="1080p">1080p</option>
+        </select>
+      </div>
+    </div>
+  </div>
+
+  <!-- 共用控制區域 -->
+  <div class="row">
+    <button id="go">一鍵生成（後端等待完成）</button>
+    <button id="download" style="display:none;">下載影片</button>
+  </div>
+  <div class="row">
+    <div id="progress" style="display:none;">
+      <p>🎬 正在生成影片... <span id="elapsed">0</span> 秒</p>
+      <div style="width:100%; height:20px; background:#f0f0f0; border-radius:10px;">
+        <div id="progressBar" style="width:0%; height:100%; background:#4CAF50; border-radius:10px; transition:width 0.5s;"></div>
+      </div>
+    </div>
+  </div>
+  <div class="row">
+    <pre id="log"></pre>
+  </div>
+  <video id="video" controls style="display:none;"></video>
+
+  <script>
+    // 全域變數
+    let currentTab = 'text';
+    let selectedImageFile = null;
+    let selectedImageBase64 = null;
+
+    const log = (msg) => {
+      const el = document.getElementById('log');
+      el.textContent += (typeof msg === 'string' ? msg : JSON.stringify(msg, null, 2)) + '\n';
+    };
+
+    // Tab 切換功能
+    function switchTab(tabName) {
+      // 更新按鈕狀態
+      document.querySelectorAll('.tab-btn').forEach(btn => {
+        btn.classList.remove('active');
+      });
+      document.querySelector(`[data-tab="${tabName}"]`).classList.add('active');
+
+      // 更新內容顯示
+      document.querySelectorAll('.tab-content').forEach(content => {
+        content.classList.add('hidden');
+      });
+      document.getElementById(`${tabName}-tab`).classList.remove('hidden');
+
+      currentTab = tabName;
+      log(`🔄 切換到 ${tabName === 'text' ? '文字生成' : '圖片+文字'} 模式`);
+    }
+
+    // 初始化 Tab 事件監聽器
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        switchTab(btn.dataset.tab);
+      });
+    });
+
+    // 圖片上傳功能
+    const imageUploadArea = document.getElementById('image-upload-area');
+    const imageInput = document.getElementById('image-input');
+    const imagePreview = document.getElementById('image-preview');
+    const imageInfo = document.getElementById('image-info');
+
+    // 點擊上傳區域
+    imageUploadArea.addEventListener('click', () => {
+      imageInput.click();
+    });
+
+    // 檔案選擇
+    imageInput.addEventListener('change', handleImageSelect);
+
+    // 拖拽功能
+    imageUploadArea.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      imageUploadArea.classList.add('dragover');
+    });
+
+    imageUploadArea.addEventListener('dragleave', () => {
+      imageUploadArea.classList.remove('dragover');
+    });
+
+    imageUploadArea.addEventListener('drop', (e) => {
+      e.preventDefault();
+      imageUploadArea.classList.remove('dragover');
+      const files = e.dataTransfer.files;
+      if (files.length > 0) {
+        handleImageFile(files[0]);
+      }
+    });
+
+    function handleImageSelect(e) {
+      const file = e.target.files[0];
+      if (file) {
+        handleImageFile(file);
+      }
+    }
+
+    function handleImageFile(file) {
+      // 檢查檔案類型
+      if (!file.type.match('image/(jpeg|png)')) {
+        log('❌ 請選擇 JPG 或 PNG 格式的圖片');
+        return;
+      }
+
+      // 檢查檔案大小 (限制 10MB)
+      if (file.size > 10 * 1024 * 1024) {
+        log('❌ 圖片大小不能超過 10MB');
+        return;
+      }
+
+      selectedImageFile = file;
+
+      // 顯示預覽
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        imagePreview.src = e.target.result;
+        imagePreview.style.display = 'block';
+        selectedImageBase64 = e.target.result.split(',')[1]; // 移除 data:image/...;base64,前綴
+        imageInfo.textContent = `📁 ${file.name} (${(file.size / 1024).toFixed(1)} KB)`;
+        log(`✅ 圖片已選擇: ${file.name}`);
+      };
+      reader.readAsDataURL(file);
+    }
+
+    // 生成按鈕事件監聽器
+    document.getElementById('go').addEventListener('click', async () => {
+      let prompt, resolution, endpoint, requestData;
+
+      if (currentTab === 'text') {
+        // 文字生成模式
+        prompt = document.getElementById('text-prompt').value;
+        resolution = document.getElementById('text-resolution').value;
+        endpoint = 'http://localhost:8001/api/veo/generate/wait';
+        requestData = {
+          prompt,
+          resolution,
+          durationSeconds: 6,
+          aspectRatio: "16:9",
+          sampleCount: 1,
+          generateAudio: true
+        };
+      } else {
+        // 圖片+文字模式
+        if (!selectedImageBase64) {
+          log('❌ 請先選擇一張圖片');
+          return;
+        }
+
+        prompt = document.getElementById('image-prompt').value || '讓圖片中的場景動畫化，加入自然的動態效果';
+        resolution = document.getElementById('image-resolution').value;
+        endpoint = 'http://localhost:8001/api/veo/generate/image-text/wait';
+        requestData = {
+          prompt,
+          imageBase64: selectedImageBase64,
+          imageMimeType: selectedImageFile.type,
+          resolution,
+          durationSeconds: 8,
+          aspectRatio: "16:9",
+          sampleCount: 1,
+          generateAudio: true
+        };
+      }
+
+      log(`🚀 開始生成影片 (${currentTab === 'text' ? '文字模式' : '圖片+文字模式'})...`);
+
+      // 顯示進度條
+      const progressDiv = document.getElementById('progress');
+      const progressBar = document.getElementById('progressBar');
+      const elapsedSpan = document.getElementById('elapsed');
+      progressDiv.style.display = 'block';
+
+      // 禁用生成按鈕
+      const goBtn = document.getElementById('go');
+      goBtn.disabled = true;
+      goBtn.textContent = '生成中...';
+
+      let startTime = Date.now();
+      const progressInterval = setInterval(() => {
+        const elapsed = Math.floor((Date.now() - startTime) / 1000);
+        elapsedSpan.textContent = elapsed;
+        // 模擬進度（實際進度由後端控制）
+        const simulatedProgress = Math.min(elapsed * 2, 90); // 每秒約2%
+        progressBar.style.width = simulatedProgress + '%';
+      }, 1000);
+
+      try {
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(requestData)
+        });
+        const data = await res.json();
+        log('📡 收到回應: ' + JSON.stringify(data, null, 2));
+
+        clearInterval(progressInterval);
+        progressBar.style.width = '100%';
+
+        if (!data.ok) {
+          log('❌ 生成失敗: ' + (data.error || '未知錯誤'));
+          return;
+        }
+
+        if (!data.done) {
+          log('⏰ 後端等待已達上限 (5分鐘)，請稍後用 operationName 繼續查詢');
+          log('🔄 Operation ID: ' + data.operationName);
+          return;
+        }
+
+        // 從回傳中找 base64 影片 - 支持多種結構
+        let b64 = '';
+        let mimeType = 'video/mp4';
+
+        // 檢查 videos 結構 (實際的 API 響應結構)
+        const videos = (data.response && data.response.videos) || [];
+        if (videos.length > 0) {
+          const video = videos[0];
+          b64 = video.bytesBase64Encoded || '';
+          mimeType = video.mimeType || 'video/mp4';
+          log('📊 找到影片資料 (videos 結構)');
+        }
+
+        // 如果沒找到，檢查 predictions 結構 (備用)
+        if (!b64) {
+          const preds = (data.response && data.response.predictions) || [];
+          if (preds.length > 0) {
+            const pred = preds[0];
+            b64 = pred.video || pred.content || '';
+            log('📊 找到影片資料 (predictions 結構)');
+          }
+        }
+
+        if (!b64) {
+          log('❌ 找不到 Base64 影片內容');
+          log('🔍 完整響應結構: ' + JSON.stringify(data.response, null, 2));
+          return;
+        }
+
+        log('✅ 影片生成成功！');
+        log('📊 影片大小: ' + Math.round(b64.length * 3/4 / 1024) + ' KB');
+
+        // 顯示影片
+        const blob = b64ToBlob(b64, mimeType);
+        const url = URL.createObjectURL(blob);
+        const video = document.getElementById('video');
+        video.src = url;
+        video.style.display = 'block';
+
+        // 顯示下載按鈕
+        const downloadBtn = document.getElementById('download');
+        downloadBtn.style.display = 'inline-block';
+        downloadBtn.onclick = () => {
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `veo_${currentTab}_${Date.now()}.mp4`;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          log('💾 影片已下載！');
+        };
+
+        // 自動播放
+        video.play();
+
+      } catch (e) {
+        clearInterval(progressInterval);
+        log('❌ 網路錯誤: ' + (e.message || String(e)));
+      } finally {
+        // 恢復按鈕狀態
+        goBtn.disabled = false;
+        goBtn.textContent = '一鍵生成（後端等待完成）';
+      }
+    });
+
+    function b64ToBlob(b64Data, contentType='', sliceSize=512) {
+      const byteCharacters = atob(b64Data);
+      const byteArrays = [];
+      for (let offset = 0; offset < byteCharacters.length; offset += sliceSize) {
+        const slice = byteCharacters.slice(offset, offset + sliceSize);
+        const byteNumbers = new Array(slice.length);
+        for (let i = 0; i < slice.length; i++) {
+          byteNumbers[i] = slice.charCodeAt(i);
+        }
+        const byteArray = new Uint8Array(byteNumbers);
+        byteArrays.push(byteArray);
+      }
+      return new Blob(byteArrays, {type: contentType});
+    }
+  </script>
+</body>
+</html>
